@@ -14,6 +14,257 @@
         }
         /* Hemos eliminado la clase .hero-bg de aquí, ya que la imagen de Isabel ahora es una etiqueta <img> */
     </style>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ====================================================================
+        // IMPORTANTE: PEGA AQUÍ TU OBJETO firebaseConfig DEL PASO 4 DE FIREBASE
+        // Reemplaza los valores de ejemplo con los tuyos.
+        // Ejemplo:
+        // const firebaseConfig = {
+        //   apiKey: "TU_API_KEY",
+        //   authDomain: "TU_AUTH_DOMAIN",
+        //   projectId: "TU_PROJECT_ID",
+        //   storageBucket: "TU_STORAGE_BUCKET",
+        //   messagingSenderId: "TU_MESSAGING_SENDER_ID",
+        //   appId: "TU_APP_ID",
+        //   measurementId: "TU_MEASUREMENT_ID" // Opcional
+        // };
+        // ====================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSy...", // REEMPLAZA ESTO
+            authDomain: "tu-proyecto.firebaseapp.com", // REEMPLAZA ESTO
+            projectId: "tu-proyecto", // REEMPLAZA ESTO
+            storageBucket: "tu-proyecto.appspot.com", // REEMPLAZA ESTO
+            messagingSenderId: "...", // REEMPLAZA ESTO
+            appId: "1:...", // REEMPLAZA ESTO
+            measurementId: "G-..." // REEMPLAZA ESTO (O elimínalo si no usas Analytics)
+        };
+        // ====================================================================
+
+        const appId = firebaseConfig.projectId; // Para GitHub Pages, appId será el projectId de Firebase
+
+        let db;
+        let auth;
+        let currentUserId;
+
+        // Función de utilidad para convertir base64 a ArrayBuffer para audio (se mantiene según las instrucciones)
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Función de utilidad para convertir PCM a WAV (se mantiene según las instrucciones)
+        function pcmToWav(pcm16, sampleRate) {
+            const dataLength = pcm16.length * 2; // 2 bytes por muestra para Int16
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            // Identificador RIFF
+            writeString(view, 0, 'RIFF');
+            // Longitud del archivo
+            view.setUint32(4, 36 + dataLength, true);
+            // Tipo RIFF
+            writeString(view, 8, 'WAVE');
+            // Identificador de chunk de formato
+            writeString(view, 12, 'fmt ');
+            // Longitud de chunk de formato
+            view.setUint32(16, 16, true);
+            // Formato de muestra (raw)
+            view.setUint16(20, 1, true);
+            // Conteo de canales
+            view.setUint16(22, 1, true);
+            // Tasa de muestreo
+            view.setUint32(24, sampleRate, true);
+            // Tasa de bytes (tasa de muestreo * alineación de bloque)
+            view.setUint32(28, sampleRate * 2, true);
+            // Alineación de bloque (conteo de canales * bytes por muestra)
+            view.setUint16(32, 2, true);
+            // Bits por muestra
+            view.setUint16(34, 16, true);
+            // Identificador de chunk de datos
+            writeString(view, 36, 'data');
+            // Longitud de chunk de datos
+            view.setUint32(40, dataLength, true);
+
+            // Escribe los datos PCM
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true);
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+
+        // Función para mostrar los mensajes
+        const displayMessages = (messages) => {
+            const messagesListDiv = document.getElementById('messages-list');
+            messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>'; // Limpia los mensajes anteriores y vuelve a añadir el título
+
+            if (messages.length === 0) {
+                messagesListDiv.innerHTML += '<p class="text-gray-500 text-center">Sé el primero en dejar un mensaje.</p>';
+                return;
+            }
+
+            // Ordena los mensajes por marca de tiempo en orden ascendente
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+
+            messages.forEach(message => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'bg-gray-50 p-4 rounded-lg shadow-sm';
+                messageDiv.innerHTML = `
+                    <p class="font-semibold text-gray-800">${message.name}:</p>
+                    <p class="text-gray-700 mt-1">${message.text}</p>
+                    <p class="text-xs text-gray-400 mt-2">${new Date(message.timestamp).toLocaleString()}</p>
+                `;
+                messagesListDiv.appendChild(messageDiv);
+            });
+        };
+
+        // Función para enviar un mensaje a Firestore
+        const sendMessage = async (event) => {
+            event.preventDefault(); // Evita el envío predeterminado del formulario
+
+            const nameInput = document.getElementById('message-name');
+            const messageTextInput = document.getElementById('message-text');
+            const sendButton = document.getElementById('send-message-btn');
+
+            const name = nameInput.value.trim();
+            const messageText = messageTextInput.value.trim();
+
+            if (!name || !messageText) {
+                console.error("Nombre y mensaje no pueden estar vacíos.");
+                // En una aplicación real, mostrarías un mensaje de error amigable para el usuario
+                return;
+            }
+
+            sendButton.disabled = true; // Deshabilita el botón para evitar múltiples envíos
+
+            try {
+                const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+                await addDoc(messagesCollectionRef, {
+                    name: name,
+                    text: messageText,
+                    timestamp: Date.now(), // Almacena la marca de tiempo para ordenar
+                    userId: currentUserId // Almacena el ID de usuario para posibles futuras características (ej. editar mensajes propios)
+                });
+
+                nameInput.value = ''; // Limpia el campo de nombre
+                messageTextInput.value = ''; // Limpia el campo de mensaje
+                console.log("Mensaje enviado con éxito!");
+            } catch (error) {
+                console.error("Error al enviar el mensaje:", error);
+                // En una aplicación real, muestra un error al usuario
+            } finally {
+                sendButton.disabled = false; // Vuelve a habilitar el botón
+            }
+        };
+
+        // Función para configurar el oyente en tiempo real para los mensajes
+        const setupRealtimeListener = () => {
+            if (!db) {
+                console.error("Firestore no está inicializado.");
+                return;
+            }
+            const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+
+            onSnapshot(messagesCollectionRef, (snapshot) => {
+                const messages = [];
+                snapshot.forEach(doc => {
+                    messages.push({ id: doc.id, ...doc.data() });
+                });
+                displayMessages(messages);
+            }, (error) => {
+                console.error("Error al escuchar los mensajes:", error);
+            });
+        };
+
+
+        // Función de cuenta regresiva (existente, se mantiene)
+        const countdown = () => {
+            // Establece la fecha del evento: 13 de septiembre de 2024 a las 17:00:00. Puedes cambiar el año, mes y día aquí.
+            const eventDate = new Date('September 13, 2024 17:00:00').getTime();
+            
+            const x = setInterval(() => {
+                const now = new Date().getTime();
+                const distance = eventDate - now;
+
+                // Cálculos de tiempo para días, horas, minutos y segundos
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                // Muestra el resultado en los elementos con IDs
+                document.getElementById("days").innerHTML = days < 10 ? '0' + days : days;
+                document.getElementById("hours").innerHTML = hours < 10 ? '0' + hours : hours;
+                document.getElementById("minutes").innerHTML = minutes < 10 ? '0' + minutes : minutes;
+                document.getElementById("seconds").innerHTML = seconds < 10 ? '0' + seconds : seconds;
+
+                // Si el contador llega a cero, muestra un mensaje
+                if (distance < 0) {
+                    clearInterval(x);
+                    document.getElementById("countdown").innerHTML = "¡Es el gran día!";
+                }
+            }, 1000);
+        };
+
+        // Inicializa Firebase y configura los oyentes cuando la ventana se carga
+        window.onload = async () => {
+            countdown(); // Inicia la cuenta regresiva existente
+
+            // Inicializa Firebase
+            if (Object.keys(firebaseConfig).length > 0) {
+                const firebaseApp = initializeApp(firebaseConfig);
+                auth = getAuth(firebaseApp);
+                db = getFirestore(firebaseApp);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        console.log("Usuario autenticado:", currentUserId);
+                    } else {
+                        // Si no hay usuario conectado, intenta iniciar sesión de forma anónima
+                        try {
+                            await signInAnonymously(auth);
+                            currentUserId = auth.currentUser?.uid || crypto.randomUUID(); // Asegura que el ID de usuario se establezca después del inicio de sesión
+                            console.log("Autenticación anónima exitosa. ID de usuario:", currentUserId);
+                        } catch (error) {
+                            console.error("Error durante la autenticación anónima:", error);
+                            currentUserId = crypto.randomUUID(); // Vuelve a un ID aleatorio si la autenticación falla
+                        }
+                    }
+                    // Configura el oyente de Firestore solo después de que la autenticación esté lista
+                    setupRealtimeListener();
+                });
+
+                // Añade el oyente de eventos para el envío del formulario
+                const messageForm = document.getElementById('message-form');
+                if (messageForm) {
+                    messageForm.addEventListener('submit', sendMessage);
+                }
+            } else {
+                console.warn("La configuración de Firebase no está disponible. Las funciones de la base de datos no estarán activas.");
+                document.getElementById('messages-list').innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3><p class="text-gray-500 text-center">Las funciones de mensajes no están disponibles (Firebase no configurado).</p>';
+            }
+        };
+    </script>
 </head>
 <body>
 
@@ -86,8 +337,8 @@
                     El evento se llevará a cabo el <strong>13 de septiembre de 2024 a las 17:00</strong> en el hermoso <strong>Hotel Gerra</strong>, en Cantabria, con vistas espectaculares al mar. Prepárense para una tarde llena de música, comida deliciosa y buena compañía.
                 </p>
                 <div class="flex justify-center mb-6">
-                    <!-- Mapa de Google Maps: Hotel Gerra, Cantabria -->
-                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2909.134590396061!2d-4.3942!3d43.3768!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd09191d8e1f5e8f%3A0x6d0e8e0e8e0e8e0e!2sHotel%20Gerra%20Mayor!5e0!3m2!1ses!2ses!4v1678901234567!5m2!1ses!2ses"
+                    <!-- Mapa de Google Maps: Hotel Gerra Mayor, Cantabria (ubicación exacta) -->
+                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d726.8388481308369!2d-4.3538192!3d43.3961045!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd490b3f04000001%3A0x7c8719ae43130d0e!2sHotel%20Gerra%20Mayor!5e0!3m2!1ses!2ses!4v1700000000000!5m2!1ses!2ses"
                             width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy" class="rounded-xl shadow-md"></iframe>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -138,14 +389,14 @@
 
     <!--
     ======================================
-    SECCIÓN 4: DUDAS
+    SECCIÓN 4: DUDAS (AHORA LIBRO DE VISITAS)
     ======================================
-    Preguntas frecuentes y un formulario de contacto.
+    Preguntas frecuentes y la sección de mensajes de los invitados.
     -->
     <section id="dudas" class="py-16 px-6 md:px-12">
         <div class="max-w-4xl mx-auto">
             <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
-                Dudas y Preguntas Frecuentes
+                Dudas y Mensajes para Isabel
             </h2>
             <div class="bg-white p-6 rounded-xl shadow-md mb-8">
                 <!-- Preguntas Frecuentes -->
@@ -167,20 +418,24 @@
                     </div>
                 </div>
                 
-                <!-- Formulario de contacto -->
+                <!-- Formulario para dejar un mensaje -->
                 <div>
-                    <h3 class="text-2xl font-bold mb-4">Envía tu pregunta</h3>
+                    <h3 class="text-2xl font-bold mb-4">Deja tu mensaje</h3>
                     <p class="text-gray-700 mb-4">
-                        Si tienes otra pregunta, puedes enviárnosla a través de este formulario. Nos pondremos en contacto contigo lo antes posible.
+                        Comparte tus buenos deseos o anécdotas para Isabel. ¡Todos podrán ver tu mensaje!
                     </p>
-                    <form class="space-y-4">
-                        <input type="text" placeholder="Tu nombre" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <input type="email" placeholder="Tu correo electrónico" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <textarea placeholder="Tu pregunta" rows="4" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                        <button type="submit" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-md hover:bg-blue-700 transition duration-300">
-                            Enviar Pregunta
+                    <form id="message-form" class="space-y-4">
+                        <input type="text" id="message-name" placeholder="Tu nombre" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <textarea id="message-text" placeholder="Tu mensaje" rows="4" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
+                        <button type="submit" id="send-message-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-md hover:bg-blue-700 transition duration-300">
+                            Enviar Mensaje
                         </button>
                     </form>
+                    <!-- Contenedor para mostrar los mensajes -->
+                    <div id="messages-list" class="mt-8 space-y-4">
+                        <h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>
+                        <p class="text-gray-500 text-center">Cargando mensajes...</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -225,8 +480,189 @@
     SCRIPTS DE JAVASCRIPT
     ======================================
     -->
-    <script>
-        // Función para el contador regresivo
+    <script type="module">
+        // Importaciones de Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ====================================================================
+        // IMPORTANTE: PEGA AQUÍ TU OBJETO firebaseConfig DEL PASO 4 DE FIREBASE
+        // Reemplaza los valores de ejemplo con los tuyos.
+        // Ejemplo:
+        // const firebaseConfig = {
+        //   apiKey: "TU_API_KEY",
+        //   authDomain: "TU_AUTH_DOMAIN",
+        //   projectId: "TU_PROJECT_ID",
+        //   storageBucket: "TU_STORAGE_BUCKET",
+        //   messagingSenderId: "TU_MESSAGING_SENDER_ID",
+        //   appId: "TU_APP_ID",
+        //   measurementId: "TU_MEASUREMENT_ID" // Opcional
+        // };
+        // ====================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSy...", // REEMPLAZA ESTO
+            authDomain: "tu-proyecto.firebaseapp.com", // REEMPLAZA ESTO
+            projectId: "tu-proyecto", // REEMPLAZA ESTO
+            storageBucket: "tu-proyecto.appspot.com", // REEMPLAZA ESTO
+            messagingSenderId: "...", // REEMPLAZA ESTO
+            appId: "1:...", // REEMPLAZA ESTO
+            measurementId: "G-..." // REEMPLAZA ESTO (O elimínalo si no usas Analytics)
+        };
+        // ====================================================================
+
+        const appId = firebaseConfig.projectId; // Para GitHub Pages, appId será el projectId de Firebase
+
+        let db;
+        let auth;
+        let currentUserId;
+
+        // Función de utilidad para convertir base64 a ArrayBuffer para audio (se mantiene según las instrucciones)
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Función de utilidad para convertir PCM a WAV (se mantiene según las instrucciones)
+        function pcmToWav(pcm16, sampleRate) {
+            const dataLength = pcm16.length * 2; // 2 bytes por muestra para Int16
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            // Identificador RIFF
+            writeString(view, 0, 'RIFF');
+            // Longitud del archivo
+            view.setUint32(4, 36 + dataLength, true);
+            // Tipo RIFF
+            writeString(view, 8, 'WAVE');
+            // Identificador de chunk de formato
+            writeString(view, 12, 'fmt ');
+            // Longitud de chunk de formato
+            view.setUint32(16, 16, true);
+            // Formato de muestra (raw)
+            view.setUint16(20, 1, true);
+            // Conteo de canales
+            view.setUint16(22, 1, true);
+            // Tasa de muestreo
+            view.setUint32(24, sampleRate, true);
+            // Tasa de bytes (tasa de muestreo * alineación de bloque)
+            view.setUint32(28, sampleRate * 2, true);
+            // Alineación de bloque (conteo de canales * bytes por muestra)
+            view.setUint16(32, 2, true);
+            // Bits por muestra
+            view.setUint16(34, 16, true);
+            // Identificador de chunk de datos
+            writeString(view, 36, 'data');
+            // Longitud de chunk de datos
+            view.setUint32(40, dataLength, true);
+
+            // Escribe los datos PCM
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true);
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+
+        // Función para mostrar los mensajes
+        const displayMessages = (messages) => {
+            const messagesListDiv = document.getElementById('messages-list');
+            messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>'; // Limpia los mensajes anteriores y vuelve a añadir el título
+
+            if (messages.length === 0) {
+                messagesListDiv.innerHTML += '<p class="text-gray-500 text-center">Sé el primero en dejar un mensaje.</p>';
+                return;
+            }
+
+            // Ordena los mensajes por marca de tiempo en orden ascendente
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+
+            messages.forEach(message => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'bg-gray-50 p-4 rounded-lg shadow-sm';
+                messageDiv.innerHTML = `
+                    <p class="font-semibold text-gray-800">${message.name}:</p>
+                    <p class="text-gray-700 mt-1">${message.text}</p>
+                    <p class="text-xs text-gray-400 mt-2">${new Date(message.timestamp).toLocaleString()}</p>
+                `;
+                messagesListDiv.appendChild(messageDiv);
+            });
+        };
+
+        // Función para enviar un mensaje a Firestore
+        const sendMessage = async (event) => {
+            event.preventDefault(); // Evita el envío predeterminado del formulario
+
+            const nameInput = document.getElementById('message-name');
+            const messageTextInput = document.getElementById('message-text');
+            const sendButton = document.getElementById('send-message-btn');
+
+            const name = nameInput.value.trim();
+            const messageText = messageTextInput.value.trim();
+
+            if (!name || !messageText) {
+                console.error("Nombre y mensaje no pueden estar vacíos.");
+                // En una aplicación real, mostrarías un mensaje de error amigable para el usuario
+                return;
+            }
+
+            sendButton.disabled = true; // Deshabilita el botón para evitar múltiples envíos
+
+            try {
+                const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+                await addDoc(messagesCollectionRef, {
+                    name: name,
+                    text: messageText,
+                    timestamp: Date.now(), // Almacena la marca de tiempo para ordenar
+                    userId: currentUserId // Almacena el ID de usuario para posibles futuras características (ej. editar mensajes propios)
+                });
+
+                nameInput.value = ''; // Limpia el campo de nombre
+                messageTextInput.value = ''; // Limpia el campo de mensaje
+                console.log("Mensaje enviado con éxito!");
+            } catch (error) {
+                console.error("Error al enviar el mensaje:", error);
+                // En una aplicación real, muestra un error al usuario
+            } finally {
+                sendButton.disabled = false; // Vuelve a habilitar el botón
+            }
+        };
+
+        // Función para configurar el oyente en tiempo real para los mensajes
+        const setupRealtimeListener = () => {
+            if (!db) {
+                console.error("Firestore no está inicializado.");
+                return;
+            }
+            const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+
+            onSnapshot(messagesCollectionRef, (snapshot) => {
+                const messages = [];
+                snapshot.forEach(doc => {
+                    messages.push({ id: doc.id, ...doc.data() });
+                });
+                displayMessages(messages);
+            }, (error) => {
+                console.error("Error al escuchar los mensajes:", error);
+            });
+        };
+
+
+        // Función de cuenta regresiva (existente, se mantiene)
         const countdown = () => {
             // Establece la fecha del evento: 13 de septiembre de 2024 a las 17:00:00. Puedes cambiar el año, mes y día aquí.
             const eventDate = new Date('September 13, 2024 17:00:00').getTime();
@@ -254,9 +690,1187 @@
                 }
             }, 1000);
         };
-        
-        // Ejecuta la función al cargar la página
-        window.onload = countdown;
+
+        // Inicializa Firebase y configura los oyentes cuando la ventana se carga
+        window.onload = async () => {
+            countdown(); // Inicia la cuenta regresiva existente
+
+            // Inicializa Firebase
+            if (Object.keys(firebaseConfig).length > 0) {
+                const firebaseApp = initializeApp(firebaseConfig);
+                auth = getAuth(firebaseApp);
+                db = getFirestore(firebaseApp);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        console.log("Usuario autenticado:", currentUserId);
+                    } else {
+                        // Si no hay usuario conectado, intenta iniciar sesión de forma anónima
+                        try {
+                            await signInAnonymously(auth);
+                            currentUserId = auth.currentUser?.uid || crypto.randomUUID(); // Asegura que el ID de usuario se establezca después del inicio de sesión
+                            console.log("Autenticación anónima exitosa. ID de usuario:", currentUserId);
+                        } catch (error) {
+                            console.error("Error durante la autenticación anónima:", error);
+                            currentUserId = crypto.randomUUID(); // Vuelve a un ID aleatorio si la autenticación falla
+                        }
+                    }
+                    // Configura el oyente de Firestore solo después de que la autenticación esté lista
+                    setupRealtimeListener();
+                });
+
+                // Añade el oyente de eventos para el envío del formulario
+                const messageForm = document.getElementById('message-form');
+                if (messageForm) {
+                    messageForm.addEventListener('submit', sendMessage);
+                }
+            } else {
+                console.warn("La configuración de Firebase no está disponible. Las funciones de la base de datos no estarán activas.");
+                document.getElementById('messages-list').innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3><p class="text-gray-500 text-center">Las funciones de mensajes no están disponibles (Firebase no configurado).</p>';
+            }
+        };
     </script>
+</head>
+<body>
+
+    <!--
+    ======================================
+    SECCIÓN 1: PORTADA
+    ======================================
+    Aquí está la portada con la foto, el título y el contador.
+    -->
+    <header id="portada" class="bg-blue-700 min-h-screen flex flex-col items-center justify-center text-white text-center p-6">
+        <h1 class="text-4xl md:text-6xl font-bold mb-4 animate-fade-in">
+            ¡Feliz 50 Cumpleaños, Isabel!
+        </h1>
+        <p class="text-lg md:text-2xl mb-8">
+            Estás invitado a celebrar medio siglo de vida, risas y buenos momentos.
+        </p>
+
+        <!-- Nueva ubicación de la foto de Isabel -->
+        <!-- Reemplaza la URL de 'placehold.co' con la URL de la foto real de Isabel. -->
+        <img src="https://placehold.co/800x600/666/fff?text=Tu+foto+de+Isabel+aquí" alt="Foto de Isabel" class="rounded-xl shadow-lg mb-8 w-full max-w-md md:max-w-lg object-cover">
+
+        <div class="bg-white text-gray-800 p-6 md:p-8 rounded-xl shadow-lg max-w-lg w-full">
+            <p class="text-lg md:text-xl font-semibold mb-4">
+                Nos vemos el 13 de septiembre
+            </p>
+            <div id="countdown" class="grid grid-cols-4 gap-2 text-2xl md:text-4xl font-bold">
+                <div class="flex flex-col items-center">
+                    <span id="days">00</span>
+                    <span class="text-sm font-normal">Días</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="hours">00</span>
+                    <span class="text-sm font-normal">Horas</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="minutes">00</span>
+                    <span class="text-sm font-normal">Minutos</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="seconds">00</span>
+                    <span class="text-sm font-normal">Segundos</span>
+                </div>
+            </div>
+        </div>
+
+        <nav class="mt-8">
+            <ul class="flex flex-wrap justify-center space-x-4 md:space-x-8">
+                <li><a href="#portada" class="text-white hover:text-blue-300 transition duration-300">Inicio</a></li>
+                <li><a href="#lugar" class="text-white hover:text-blue-300 transition duration-300">El Evento</a></li>
+                <li><a href="#alojamientos" class="text-white hover:text-blue-300 transition duration-300">Alojamientos</a></li>
+                <li><a href="#dudas" class="text-white hover:text-blue-300 transition duration-300">Dudas</a></li>
+                <li><a href="#que-hacer" class="text-white hover:text-blue-300 transition duration-300">Qué Hacer</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!--
+    ======================================
+    SECCIÓN 2: LUGAR DEL EVENTO
+    ======================================
+    Aquí irán los detalles del lugar, un mapa y fotos.
+    -->
+    <section id="lugar" class="py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                El Lugar de la Celebración
+            </h2>
+            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <p class="text-gray-700 text-lg mb-6">
+                    El evento se llevará a cabo el <strong>13 de septiembre de 2024 a las 17:00</strong> en el hermoso <strong>Hotel Gerra</strong>, en Cantabria, con vistas espectaculares al mar. Prepárense para una tarde llena de música, comida deliciosa y buena compañía.
+                </p>
+                <div class="flex justify-center mb-6">
+                    <!-- Mapa de Google Maps: Hotel Gerra Mayor, Cantabria (ubicación exacta) -->
+                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d726.8388481308369!2d-4.3538192!3d43.3961045!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd490b3f04000001%3A0x7c8719ae43130d0e!2sHotel%20Gerra%20Mayor!5e0!3m2!1ses!2ses!4v1700000000000!5m2!1ses!2ses"
+                            width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy" class="rounded-xl shadow-md"></iframe>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Imágenes del Hotel Gerra. Reemplaza estas URL con tus propias fotos. -->
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Vistas+al+Mar" alt="Vistas al mar desde Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Interior" alt="Interior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Exterior" alt="Exterior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 3: ALOJAMIENTOS
+    ======================================
+    Ideas y fotos de alojamientos cercanos.
+    -->
+    <section id="alojamientos" class="bg-gray-100 py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Opciones de Alojamiento
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Tarjeta de alojamiento 1 -->
+                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
+                    <img src="https://placehold.co/200x200/444/fff?text=Hotel+A" alt="Hotel A" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
+                    <div>
+                        <h3 class="text-xl font-bold mb-2">Hotel La Vista</h3>
+                        <p class="text-gray-700">
+                            Un hotel encantador a solo 5 minutos del evento. Ofrece desayuno incluido y un excelente servicio.
+                        </p>
+                    </div>
+                </div>
+                <!-- Tarjeta de alojamiento 2 -->
+                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
+                    <img src="https://placehold.co/200x200/444/fff?text=Casa+Rural" alt="Casa Rural" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
+                    <div>
+                        <h3 class="text-xl font-bold mb-2">Casa Rural El Bosque</h3>
+                        <p class="text-gray-700">
+                            Perfecto para grupos grandes. Una casa rural con piscina y vistas panorámicas para una estancia relajada.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 4: DUDAS (AHORA LIBRO DE VISITAS)
+    ======================================
+    Preguntas frecuentes y la sección de mensajes de los invitados.
+    -->
+    <section id="dudas" class="py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Dudas y Mensajes para Isabel
+            </h2>
+            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <!-- Preguntas Frecuentes -->
+                <div class="mb-8">
+                    <h3 class="text-2xl font-bold mb-4">Preguntas Frecuentes</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="font-semibold text-lg">¿Hay código de vestimenta?</p>
+                            <p class="text-gray-700 mt-1">El código de vestimenta es "casual elegante". Queremos que te sientas cómodo, pero festivo.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg">¿Puedo llevar a mi pareja/acompañante?</p>
+                            <p class="text-gray-700 mt-1">Sí, claro, siempre que nos lo confirmes con antelación para la organización.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg">¿Se necesita regalo?</p>
+                            <p class="text-gray-700 mt-1">Tu presencia es el mejor regalo. ¡No te preocupes por nada más!</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Formulario para dejar un mensaje -->
+                <div>
+                    <h3 class="text-2xl font-bold mb-4">Deja tu mensaje</h3>
+                    <p class="text-gray-700 mb-4">
+                        Comparte tus buenos deseos o anécdotas para Isabel. ¡Todos podrán ver tu mensaje!
+                    </p>
+                    <form id="message-form" class="space-y-4">
+                        <input type="text" id="message-name" placeholder="Tu nombre" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <textarea id="message-text" placeholder="Tu mensaje" rows="4" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
+                        <button type="submit" id="send-message-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-md hover:bg-blue-700 transition duration-300">
+                            Enviar Mensaje
+                        </button>
+                    </form>
+                    <!-- Contenedor para mostrar los mensajes -->
+                    <div id="messages-list" class="mt-8 space-y-4">
+                        <h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>
+                        <p class="text-gray-500 text-center">Cargando mensajes...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 5: QUÉ HACER
+    ======================================
+    Otras actividades en la zona.
+    -->
+    <section id="que-hacer" class="bg-gray-100 py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Qué Hacer en la Zona
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Tarjeta de actividad 1 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Senderismo" alt="Rutas de senderismo" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Rutas de Senderismo</h3>
+                    <p class="text-gray-700">Explora los senderos cercanos y disfruta de la naturaleza y las vistas panorámicas. Hay rutas para todos los niveles.</p>
+                </div>
+                <!-- Tarjeta de actividad 2 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Bodega" alt="Visita a bodega" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Visita a una Bodega Local</h3>
+                    <p class="text-gray-700">La región es famosa por sus vinos. Programa una visita guiada y cata de vinos en alguna de las bodegas cercanas.</p>
+                </div>
+                <!-- Tarjeta de actividad 3 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Pueblo" alt="Pueblo pintoresco" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Descubre un Pueblo Pintoresco</h3>
+                    <p class="text-gray-700">A pocos minutos en coche, encontrarás encantadores pueblos con historia, tiendas de artesanía y restaurantes tradicionales.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!--
+    ======================================
+    SCRIPTS DE JAVASCRIPT
+    ======================================
+    -->
+    <script type="module">
+        // Importaciones de Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ====================================================================
+        // IMPORTANTE: PEGA AQUÍ TU OBJETO firebaseConfig DEL PASO 4 DE FIREBASE
+        // Reemplaza los valores de ejemplo con los tuyos.
+        // Ejemplo:
+        // const firebaseConfig = {
+        //   apiKey: "TU_API_KEY",
+        //   authDomain: "tu-proyecto.firebaseapp.com",
+        //   projectId: "tu-proyecto",
+        //   storageBucket: "tu-proyecto.appspot.com",
+        //   messagingSenderId: "...",
+        //   appId: "1:...",
+        //   measurementId: "G-..." // Opcional
+        // };
+        // ====================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSy...", // REEMPLAZA ESTO
+            authDomain: "tu-proyecto.firebaseapp.com", // REEMPLAZA ESTO
+            projectId: "tu-proyecto", // REEMPLAZA ESTO
+            storageBucket: "tu-proyecto.appspot.com", // REEMPLAZA ESTO
+            messagingSenderId: "...", // REEMPLAZA ESTO
+            appId: "1:...", // REEMPLAZA ESTO
+            measurementId: "G-..." // REEMPLAZA ESTO (O elimínalo si no usas Analytics)
+        };
+        // ====================================================================
+
+        const appId = firebaseConfig.projectId; // Para GitHub Pages, appId será el projectId de Firebase
+
+        let db;
+        let auth;
+        let currentUserId;
+
+        // Función de utilidad para convertir base64 a ArrayBuffer para audio (se mantiene según las instrucciones)
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Función de utilidad para convertir PCM a WAV (se mantiene según las instrucciones)
+        function pcmToWav(pcm16, sampleRate) {
+            const dataLength = pcm16.length * 2; // 2 bytes por muestra para Int16
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            // Identificador RIFF
+            writeString(view, 0, 'RIFF');
+            // Longitud del archivo
+            view.setUint32(4, 36 + dataLength, true);
+            // Tipo RIFF
+            writeString(view, 8, 'WAVE');
+            // Identificador de chunk de formato
+            writeString(view, 12, 'fmt ');
+            // Longitud de chunk de formato
+            view.setUint32(16, 16, true);
+            // Formato de muestra (raw)
+            view.setUint16(20, 1, true);
+            // Conteo de canales
+            view.setUint16(22, 1, true);
+            // Tasa de muestreo
+            view.setUint32(24, sampleRate, true);
+            // Tasa de bytes (tasa de muestreo * alineación de bloque)
+            view.setUint32(28, sampleRate * 2, true);
+            // Alineación de bloque (conteo de canales * bytes por muestra)
+            view.setUint16(32, 2, true);
+            // Bits por muestra
+            view.setUint16(34, 16, true);
+            // Identificador de chunk de datos
+            writeString(view, 36, 'data');
+            // Longitud de chunk de datos
+            view.setUint32(40, dataLength, true);
+
+            // Escribe los datos PCM
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true);
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+
+        // Función para mostrar los mensajes
+        const displayMessages = (messages) => {
+            const messagesListDiv = document.getElementById('messages-list');
+            messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>'; // Limpia los mensajes anteriores y vuelve a añadir el título
+
+            if (messages.length === 0) {
+                messagesListDiv.innerHTML += '<p class="text-gray-500 text-center">Sé el primero en dejar un mensaje.</p>';
+                return;
+            }
+
+            // Ordena los mensajes por marca de tiempo en orden ascendente
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+
+            messages.forEach(message => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'bg-gray-50 p-4 rounded-lg shadow-sm';
+                messageDiv.innerHTML = `
+                    <p class="font-semibold text-gray-800">${message.name}:</p>
+                    <p class="text-gray-700 mt-1">${message.text}</p>
+                    <p class="text-xs text-gray-400 mt-2">${new Date(message.timestamp).toLocaleString()}</p>
+                `;
+                messagesListDiv.appendChild(messageDiv);
+            });
+        };
+
+        // Función para enviar un mensaje a Firestore
+        const sendMessage = async (event) => {
+            event.preventDefault(); // Evita el envío predeterminado del formulario
+
+            const nameInput = document.getElementById('message-name');
+            const messageTextInput = document.getElementById('message-text');
+            const sendButton = document.getElementById('send-message-btn');
+
+            const name = nameInput.value.trim();
+            const messageText = messageTextInput.value.trim();
+
+            if (!name || !messageText) {
+                console.error("Nombre y mensaje no pueden estar vacíos.");
+                // En una aplicación real, mostrarías un mensaje de error amigable para el usuario
+                return;
+            }
+
+            sendButton.disabled = true; // Deshabilita el botón para evitar múltiples envíos
+
+            try {
+                const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+                await addDoc(messagesCollectionRef, {
+                    name: name,
+                    text: messageText,
+                    timestamp: Date.now(), // Almacena la marca de tiempo para ordenar
+                    userId: currentUserId // Almacena el ID de usuario para posibles futuras características (ej. editar mensajes propios)
+                });
+
+                nameInput.value = ''; // Limpia el campo de nombre
+                messageTextInput.value = ''; // Limpia el campo de mensaje
+                console.log("Mensaje enviado con éxito!");
+            } catch (error) {
+                console.error("Error al enviar el mensaje:", error);
+                // En una aplicación real, muestra un error al usuario
+            } finally {
+                sendButton.disabled = false; // Vuelve a habilitar el botón
+            }
+        };
+
+        // Función para configurar el oyente en tiempo real para los mensajes
+        const setupRealtimeListener = () => {
+            if (!db) {
+                console.error("Firestore no está inicializado.");
+                return;
+            }
+            const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+
+            onSnapshot(messagesCollectionRef, (snapshot) => {
+                const messages = [];
+                snapshot.forEach(doc => {
+                    messages.push({ id: doc.id, ...doc.data() });
+                });
+                displayMessages(messages);
+            }, (error) => {
+                console.error("Error al escuchar los mensajes:", error);
+            });
+        };
+
+
+        // Función de cuenta regresiva (existente, se mantiene)
+        const countdown = () => {
+            // Establece la fecha del evento: 13 de septiembre de 2024 a las 17:00:00. Puedes cambiar el año, mes y día aquí.
+            const eventDate = new Date('September 13, 2024 17:00:00').getTime();
+            
+            const x = setInterval(() => {
+                const now = new Date().getTime();
+                const distance = eventDate - now;
+
+                // Cálculos de tiempo para días, horas, minutos y segundos
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                // Muestra el resultado en los elementos con IDs
+                document.getElementById("days").innerHTML = days < 10 ? '0' + days : days;
+                document.getElementById("hours").innerHTML = hours < 10 ? '0' + hours : hours;
+                document.getElementById("minutes").innerHTML = minutes < 10 ? '0' + minutes : minutes;
+                document.getElementById("seconds").innerHTML = seconds < 10 ? '0' + seconds : seconds;
+
+                // Si el contador llega a cero, muestra un mensaje
+                if (distance < 0) {
+                    clearInterval(x);
+                    document.getElementById("countdown").innerHTML = "¡Es el gran día!";
+                }
+            }, 1000);
+        };
+
+        // Inicializa Firebase y configura los oyentes cuando la ventana se carga
+        window.onload = async () => {
+            countdown(); // Inicia la cuenta regresiva existente
+
+            // Inicializa Firebase
+            if (Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) { // Asegúrate de que la API Key exista
+                const firebaseApp = initializeApp(firebaseConfig);
+                auth = getAuth(firebaseApp);
+                db = getFirestore(firebaseApp);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        console.log("Usuario autenticado:", currentUserId);
+                    } else {
+                        // Si no hay usuario conectado, intenta iniciar sesión de forma anónima
+                        try {
+                            await signInAnonymously(auth);
+                            currentUserId = auth.currentUser?.uid || crypto.randomUUID(); // Asegura que el ID de usuario se establezca después del inicio de sesión
+                            console.log("Autenticación anónima exitosa. ID de usuario:", currentUserId);
+                        } catch (error) {
+                            console.error("Error durante la autenticación anónima:", error);
+                            currentUserId = crypto.randomUUID(); // Vuelve a un ID aleatorio si la autenticación falla
+                        }
+                    }
+                    // Configura el oyente de Firestore solo después de que la autenticación esté lista
+                    setupRealtimeListener();
+                });
+
+                // Añade el oyente de eventos para el envío del formulario
+                const messageForm = document.getElementById('message-form');
+                if (messageForm) {
+                    messageForm.addEventListener('submit', sendMessage);
+                }
+            } else {
+                console.warn("La configuración de Firebase no está disponible o incompleta. Las funciones de la base de datos no estarán activas.");
+                document.getElementById('messages-list').innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3><p class="text-gray-500 text-center">Las funciones de mensajes no están disponibles (Firebase no configurado correctamente).</p>';
+            }
+        };
+    </script>
+</head>
+<body>
+
+    <!--
+    ======================================
+    SECCIÓN 1: PORTADA
+    ======================================
+    Aquí está la portada con la foto, el título y el contador.
+    -->
+    <header id="portada" class="bg-blue-700 min-h-screen flex flex-col items-center justify-center text-white text-center p-6">
+        <h1 class="text-4xl md:text-6xl font-bold mb-4 animate-fade-in">
+            ¡Feliz 50 Cumpleaños, Isabel!
+        </h1>
+        <p class="text-lg md:text-2xl mb-8">
+            Estás invitado a celebrar medio siglo de vida, risas y buenos momentos.
+        </p>
+
+        <!-- Nueva ubicación de la foto de Isabel -->
+        <!-- Reemplaza la URL de 'placehold.co' con la URL de la foto real de Isabel. -->
+        <img src="https://placehold.co/800x600/666/fff?text=Tu+foto+de+Isabel+aquí" alt="Foto de Isabel" class="rounded-xl shadow-lg mb-8 w-full max-w-md md:max-w-lg object-cover">
+
+        <div class="bg-white text-gray-800 p-6 md:p-8 rounded-xl shadow-lg max-w-lg w-full">
+            <p class="text-lg md:text-xl font-semibold mb-4">
+                Nos vemos el 13 de septiembre
+            </p>
+            <div id="countdown" class="grid grid-cols-4 gap-2 text-2xl md:text-4xl font-bold">
+                <div class="flex flex-col items-center">
+                    <span id="days">00</span>
+                    <span class="text-sm font-normal">Días</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="hours">00</span>
+                    <span class="text-sm font-normal">Horas</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="minutes">00</span>
+                    <span class="text-sm font-normal">Minutos</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="seconds">00</span>
+                    <span class="text-sm font-normal">Segundos</span>
+                </div>
+            </div>
+        </div>
+
+        <nav class="mt-8">
+            <ul class="flex flex-wrap justify-center space-x-4 md:space-x-8">
+                <li><a href="#portada" class="text-white hover:text-blue-300 transition duration-300">Inicio</a></li>
+                <li><a href="#lugar" class="text-white hover:text-blue-300 transition duration-300">El Evento</a></li>
+                <li><a href="#alojamientos" class="text-white hover:text-blue-300 transition duration-300">Alojamientos</a></li>
+                <li><a href="#dudas" class="text-white hover:text-blue-300 transition duration-300">Dudas</a></li>
+                <li><a href="#que-hacer" class="text-white hover:text-blue-300 transition duration-300">Qué Hacer</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!--
+    ======================================
+    SECCIÓN 2: LUGAR DEL EVENTO
+    ======================================
+    Aquí irán los detalles del lugar, un mapa y fotos.
+    -->
+    <section id="lugar" class="py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                El Lugar de la Celebración
+            </h2>
+            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <p class="text-gray-700 text-lg mb-6">
+                    El evento se llevará a cabo el <strong>13 de septiembre de 2024 a las 17:00</strong> en el hermoso <strong>Hotel Gerra</strong>, en Cantabria, con vistas espectaculares al mar. Prepárense para una tarde llena de música, comida deliciosa y buena compañía.
+                </p>
+                <div class="flex justify-center mb-6">
+                    <!-- Mapa de Google Maps: Hotel Gerra Mayor, Cantabria (ubicación exacta) -->
+                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d726.8388481308369!2d-4.3538192!3d43.3961045!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd490b3f04000001%3A0x7c8719ae43130d0e!2sHotel%20Gerra%20Mayor!5e0!3m2!1ses!2ses!4v1700000000000!5m2!1ses!2ses"
+                            width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy" class="rounded-xl shadow-md"></iframe>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Imágenes del Hotel Gerra. Reemplaza estas URL con tus propias fotos. -->
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Vistas+al+Mar" alt="Vistas al mar desde Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Interior" alt="Interior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Exterior" alt="Exterior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 3: ALOJAMIENTOS
+    ======================================
+    Ideas y fotos de alojamientos cercanos.
+    -->
+    <section id="alojamientos" class="bg-gray-100 py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Opciones de Alojamiento
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Tarjeta de alojamiento 1 -->
+                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
+                    <img src="https://placehold.co/200x200/444/fff?text=Hotel+A" alt="Hotel A" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
+                    <div>
+                        <h3 class="text-xl font-bold mb-2">Hotel La Vista</h3>
+                        <p class="text-gray-700">
+                            Un hotel encantador a solo 5 minutos del evento. Ofrece desayuno incluido y un excelente servicio.
+                        </p>
+                    </div>
+                </div>
+                <!-- Tarjeta de alojamiento 2 -->
+                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
+                    <img src="https://placehold.co/200x200/444/fff?text=Casa+Rural" alt="Casa Rural" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
+                    <div>
+                        <h3 class="text-xl font-bold mb-2">Casa Rural El Bosque</h3>
+                        <p class="text-gray-700">
+                            Perfecto para grupos grandes. Una casa rural con piscina y vistas panorámicas para una estancia relajada.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 4: DUDAS (AHORA LIBRO DE VISITAS)
+    ======================================
+    Preguntas frecuentes y la sección de mensajes de los invitados.
+    -->
+    <section id="dudas" class="py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Dudas y Mensajes para Isabel
+            </h2>
+            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <!-- Preguntas Frecuentes -->
+                <div class="mb-8">
+                    <h3 class="text-2xl font-bold mb-4">Preguntas Frecuentes</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="font-semibold text-lg">¿Hay código de vestimenta?</p>
+                            <p class="text-gray-700 mt-1">El código de vestimenta es "casual elegante". Queremos que te sientas cómodo, pero festivo.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg">¿Puedo llevar a mi pareja/acompañante?</p>
+                            <p class="text-gray-700 mt-1">Sí, claro, siempre que nos lo confirmes con antelación para la organización.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg">¿Se necesita regalo?</p>
+                            <p class="text-gray-700 mt-1">Tu presencia es el mejor regalo. ¡No te preocupes por nada más!</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Formulario para dejar un mensaje -->
+                <div>
+                    <h3 class="text-2xl font-bold mb-4">Deja tu mensaje</h3>
+                    <p class="text-gray-700 mb-4">
+                        Comparte tus buenos deseos o anécdotas para Isabel. ¡Todos podrán ver tu mensaje!
+                    </p>
+                    <form id="message-form" class="space-y-4">
+                        <input type="text" id="message-name" placeholder="Tu nombre" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <textarea id="message-text" placeholder="Tu mensaje" rows="4" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
+                        <button type="submit" id="send-message-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-md hover:bg-blue-700 transition duration-300">
+                            Enviar Mensaje
+                        </button>
+                    </form>
+                    <!-- Contenedor para mostrar los mensajes -->
+                    <div id="messages-list" class="mt-8 space-y-4">
+                        <h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>
+                        <p class="text-gray-500 text-center">Cargando mensajes...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 5: QUÉ HACER
+    ======================================
+    Otras actividades en la zona.
+    -->
+    <section id="que-hacer" class="bg-gray-100 py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Qué Hacer en la Zona
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Tarjeta de actividad 1 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Senderismo" alt="Rutas de senderismo" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Rutas de Senderismo</h3>
+                    <p class="text-gray-700">Explora los senderos cercanos y disfruta de la naturaleza y las vistas panorámicas. Hay rutas para todos los niveles.</p>
+                </div>
+                <!-- Tarjeta de actividad 2 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Bodega" alt="Visita a bodega" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Visita a una Bodega Local</h3>
+                    <p class="text-gray-700">La región es famosa por sus vinos. Programa una visita guiada y cata de vinos en alguna de las bodegas cercanas.</p>
+                </div>
+                <!-- Tarjeta de actividad 3 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Pueblo" alt="Pueblo pintoresco" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Descubre un Pueblo Pintoresco</h3>
+                    <p class="text-gray-700">A pocos minutos en coche, encontrarás encantadores pueblos con historia, tiendas de artesanía y restaurantes tradicionales.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!--
+    ======================================
+    SCRIPTS DE JAVASCRIPT
+    ======================================
+    -->
+    <script type="module">
+        // Importaciones de Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ====================================================================
+        // IMPORTANTE: PEGA AQUÍ TU OBJETO firebaseConfig DEL PASO 4 DE FIREBASE
+        // Reemplaza los valores de ejemplo con los tuyos.
+        // Ejemplo:
+        // const firebaseConfig = {
+        //   apiKey: "TU_API_KEY",
+        //   authDomain: "tu-proyecto.firebaseapp.com",
+        //   projectId: "tu-proyecto",
+        //   storageBucket: "tu-proyecto.appspot.com",
+        //   messagingSenderId: "...",
+        //   appId: "1:...",
+        //   measurementId: "G-..." // Opcional
+        // };
+        // ====================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSy...", // REEMPLAZA ESTO
+            authDomain: "tu-proyecto.firebaseapp.com", // REEMPLAZA ESTO
+            projectId: "tu-proyecto", // REEMPLAZA ESTO
+            storageBucket: "tu-proyecto.appspot.com", // REEMPLAZA ESTO
+            messagingSenderId: "...", // REEMPLAZA ESTO
+            appId: "1:...", // REEMPLAZA ESTO
+            measurementId: "G-..." // REEMPLAZA ESTO (O elimínalo si no usas Analytics)
+        };
+        // ====================================================================
+
+        const appId = firebaseConfig.projectId; // Para GitHub Pages, appId será el projectId de Firebase
+
+        let db;
+        let auth;
+        let currentUserId;
+
+        // Función de utilidad para convertir base64 a ArrayBuffer para audio (se mantiene según las instrucciones)
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Función de utilidad para convertir PCM a WAV (se mantiene según las instrucciones)
+        function pcmToWav(pcm16, sampleRate) {
+            const dataLength = pcm16.length * 2; // 2 bytes por muestra para Int16
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            // Identificador RIFF
+            writeString(view, 0, 'RIFF');
+            // Longitud del archivo
+            view.setUint32(4, 36 + dataLength, true);
+            // Tipo RIFF
+            writeString(view, 8, 'WAVE');
+            // Identificador de chunk de formato
+            writeString(view, 12, 'fmt ');
+            // Longitud de chunk de formato
+            view.setUint32(16, 16, true);
+            // Formato de muestra (raw)
+            view.setUint16(20, 1, true);
+            // Conteo de canales
+            view.setUint16(22, 1, true);
+            // Tasa de muestreo
+            view.setUint32(24, sampleRate, true);
+            // Tasa de bytes (tasa de muestreo * alineación de bloque)
+            view.setUint32(28, sampleRate * 2, true);
+            // Alineación de bloque (conteo de canales * bytes por muestra)
+            view.setUint16(32, 2, true);
+            // Bits por muestra
+            view.setUint16(34, 16, true);
+            // Identificador de chunk de datos
+            writeString(view, 36, 'data');
+            // Longitud de chunk de datos
+            view.setUint32(40, dataLength, true);
+
+            // Escribe los datos PCM
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true);
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+
+        // Función para mostrar los mensajes
+        const displayMessages = (messages) => {
+            const messagesListDiv = document.getElementById('messages-list');
+            messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>'; // Limpia los mensajes anteriores y vuelve a añadir el título
+
+            if (messages.length === 0) {
+                messagesListDiv.innerHTML += '<p class="text-gray-500 text-center">Sé el primero en dejar un mensaje.</p>';
+                return;
+            }
+
+            // Ordena los mensajes por marca de tiempo en orden ascendente
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+
+            messages.forEach(message => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'bg-gray-50 p-4 rounded-lg shadow-sm';
+                messageDiv.innerHTML = `
+                    <p class="font-semibold text-gray-800">${message.name}:</p>
+                    <p class="text-gray-700 mt-1">${message.text}</p>
+                    <p class="text-xs text-gray-400 mt-2">${new Date(message.timestamp).toLocaleString()}</p>
+                `;
+                messagesListDiv.appendChild(messageDiv);
+            });
+        };
+
+        // Función para enviar un mensaje a Firestore
+        const sendMessage = async (event) => {
+            event.preventDefault(); // Evita el envío predeterminado del formulario
+
+            const nameInput = document.getElementById('message-name');
+            const messageTextInput = document.getElementById('message-text');
+            const sendButton = document.getElementById('send-message-btn');
+
+            const name = nameInput.value.trim();
+            const messageText = messageTextInput.value.trim();
+
+            if (!name || !messageText) {
+                console.error("Nombre y mensaje no pueden estar vacíos.");
+                // En una aplicación real, mostrarías un mensaje de error amigable para el usuario
+                return;
+            }
+
+            sendButton.disabled = true; // Deshabilita el botón para evitar múltiples envíos
+
+            try {
+                const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+                await addDoc(messagesCollectionRef, {
+                    name: name,
+                    text: messageText,
+                    timestamp: Date.now(), // Almacena la marca de tiempo para ordenar
+                    userId: currentUserId // Almacena el ID de usuario para posibles futuras características (ej. editar mensajes propios)
+                });
+
+                nameInput.value = ''; // Limpia el campo de nombre
+                messageTextInput.value = ''; // Limpia el campo de mensaje
+                console.log("Mensaje enviado con éxito!");
+            } catch (error) {
+                console.error("Error al enviar el mensaje:", error);
+                // En una aplicación real, muestra un error al usuario
+            } finally {
+                sendButton.disabled = false; // Vuelve a habilitar el botón
+            }
+        };
+
+        // Función para configurar el oyente en tiempo real para los mensajes
+        const setupRealtimeListener = () => {
+            if (!db) {
+                console.error("Firestore no está inicializado.");
+                return;
+            }
+            const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+
+            onSnapshot(messagesCollectionRef, (snapshot) => {
+                const messages = [];
+                snapshot.forEach(doc => {
+                    messages.push({ id: doc.id, ...doc.data() });
+                });
+                displayMessages(messages);
+            }, (error) => {
+                console.error("Error al escuchar los mensajes:", error);
+            });
+        };
+
+
+        // Función de cuenta regresiva (existente, se mantiene)
+        const countdown = () => {
+            // Establece la fecha del evento: 13 de septiembre de 2024 a las 17:00:00. Puedes cambiar el año, mes y día aquí.
+            const eventDate = new Date('September 13, 2024 17:00:00').getTime();
+            
+            const x = setInterval(() => {
+                const now = new Date().getTime();
+                const distance = eventDate - now;
+
+                // Cálculos de tiempo para días, horas, minutos y segundos
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                // Muestra el resultado en los elementos con IDs
+                document.getElementById("days").innerHTML = days < 10 ? '0' + days : days;
+                document.getElementById("hours").innerHTML = hours < 10 ? '0' + hours : hours;
+                document.getElementById("minutes").innerHTML = minutes < 10 ? '0' + minutes : minutes;
+                document.getElementById("seconds").innerHTML = seconds < 10 ? '0' + seconds : seconds;
+
+                // Si el contador llega a cero, muestra un mensaje
+                if (distance < 0) {
+                    clearInterval(x);
+                    document.getElementById("countdown").innerHTML = "¡Es el gran día!";
+                }
+            }, 1000);
+        };
+
+        // Inicializa Firebase y configura los oyentes cuando la ventana se carga
+        window.onload = async () => {
+            countdown(); // Inicia la cuenta regresiva existente
+
+            // Inicializa Firebase
+            if (Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) { // Asegúrate de que la API Key exista
+                const firebaseApp = initializeApp(firebaseConfig);
+                auth = getAuth(firebaseApp);
+                db = getFirestore(firebaseApp);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                        console.log("Usuario autenticado:", currentUserId);
+                    } else {
+                        // Si no hay usuario conectado, intenta iniciar sesión de forma anónima
+                        try {
+                            await signInAnonymously(auth);
+                            currentUserId = auth.currentUser?.uid || crypto.randomUUID(); // Asegura que el ID de usuario se establezca después del inicio de sesión
+                            console.log("Autenticación anónima exitosa. ID de usuario:", currentUserId);
+                        } catch (error) {
+                            console.error("Error durante la autenticación anónima:", error);
+                            currentUserId = crypto.randomUUID(); // Vuelve a un ID aleatorio si la autenticación falla
+                        }
+                    }
+                    // Configura el oyente de Firestore solo después de que la autenticación esté lista
+                    setupRealtimeListener();
+                });
+
+                // Añade el oyente de eventos para el envío del formulario
+                const messageForm = document.getElementById('message-form');
+                if (messageForm) {
+                    messageForm.addEventListener('submit', sendMessage);
+                }
+            } else {
+                console.warn("La configuración de Firebase no está disponible o incompleta. Las funciones de la base de datos no estarán activas.");
+                document.getElementById('messages-list').innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3><p class="text-gray-500 text-center">Las funciones de mensajes no están disponibles (Firebase no configurado correctamente).</p>';
+            }
+        };
+    </script>
+</head>
+<body>
+
+    <!--
+    ======================================
+    SECCIÓN 1: PORTADA
+    ======================================
+    Aquí está la portada con la foto, el título y el contador.
+    -->
+    <header id="portada" class="bg-blue-700 min-h-screen flex flex-col items-center justify-center text-white text-center p-6">
+        <h1 class="text-4xl md:text-6xl font-bold mb-4 animate-fade-in">
+            ¡Feliz 50 Cumpleaños, Isabel!
+        </h1>
+        <p class="text-lg md:text-2xl mb-8">
+            Estás invitado a celebrar medio siglo de vida, risas y buenos momentos.
+        </p>
+
+        <!-- Nueva ubicación de la foto de Isabel -->
+        <!-- Reemplaza la URL de 'placehold.co' con la URL de la foto real de Isabel. -->
+        <img src="https://placehold.co/800x600/666/fff?text=Tu+foto+de+Isabel+aquí" alt="Foto de Isabel" class="rounded-xl shadow-lg mb-8 w-full max-w-md md:max-w-lg object-cover">
+
+        <div class="bg-white text-gray-800 p-6 md:p-8 rounded-xl shadow-lg max-w-lg w-full">
+            <p class="text-lg md:text-xl font-semibold mb-4">
+                Nos vemos el 13 de septiembre
+            </p>
+            <div id="countdown" class="grid grid-cols-4 gap-2 text-2xl md:text-4xl font-bold">
+                <div class="flex flex-col items-center">
+                    <span id="days">00</span>
+                    <span class="text-sm font-normal">Días</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="hours">00</span>
+                    <span class="text-sm font-normal">Horas</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="minutes">00</span>
+                    <span class="text-sm font-normal">Minutos</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="seconds">00</span>
+                    <span class="text-sm font-normal">Segundos</span>
+                </div>
+            </div>
+        </div>
+
+        <nav class="mt-8">
+            <ul class="flex flex-wrap justify-center space-x-4 md:space-x-8">
+                <li><a href="#portada" class="text-white hover:text-blue-300 transition duration-300">Inicio</a></li>
+                <li><a href="#lugar" class="text-white hover:text-blue-300 transition duration-300">El Evento</a></li>
+                <li><a href="#alojamientos" class="text-white hover:text-blue-300 transition duration-300">Alojamientos</a></li>
+                <li><a href="#dudas" class="text-white hover:text-blue-300 transition duration-300">Dudas</a></li>
+                <li><a href="#que-hacer" class="text-white hover:text-blue-300 transition duration-300">Qué Hacer</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!--
+    ======================================
+    SECCIÓN 2: LUGAR DEL EVENTO
+    ======================================
+    Aquí irán los detalles del lugar, un mapa y fotos.
+    -->
+    <section id="lugar" class="py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                El Lugar de la Celebración
+            </h2>
+            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <p class="text-gray-700 text-lg mb-6">
+                    El evento se llevará a cabo el <strong>13 de septiembre de 2024 a las 17:00</strong> en el hermoso <strong>Hotel Gerra</strong>, en Cantabria, con vistas espectaculares al mar. Prepárense para una tarde llena de música, comida deliciosa y buena compañía.
+                </p>
+                <div class="flex justify-center mb-6">
+                    <!-- Mapa de Google Maps: Hotel Gerra Mayor, Cantabria (ubicación exacta) -->
+                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d726.8388481308369!2d-4.3538192!3d43.3961045!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd490b3f04000001%3A0x7c8719ae43130d0e!2sHotel%20Gerra%20Mayor!5e0!3m2!1ses!2ses!4v1700000000000!5m2!1ses!2ses"
+                            width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy" class="rounded-xl shadow-md"></iframe>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Imágenes del Hotel Gerra. Reemplaza estas URL con tus propias fotos. -->
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Vistas+al+Mar" alt="Vistas al mar desde Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Interior" alt="Interior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Exterior" alt="Exterior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 3: ALOJAMIENTOS
+    ======================================
+    Ideas y fotos de alojamientos cercanos.
+    -->
+    <section id="alojamientos" class="bg-gray-100 py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Opciones de Alojamiento
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Tarjeta de alojamiento 1 -->
+                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
+                    <img src="https://placehold.co/200x200/444/fff?text=Hotel+A" alt="Hotel A" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
+                    <div>
+                        <h3 class="text-xl font-bold mb-2">Hotel La Vista</h3>
+                        <p class="text-gray-700">
+                            Un hotel encantador a solo 5 minutos del evento. Ofrece desayuno incluido y un excelente servicio.
+                        </p>
+                    </div>
+                </div>
+                <!-- Tarjeta de alojamiento 2 -->
+                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
+                    <img src="https://placehold.co/200x200/444/fff?text=Casa+Rural" alt="Casa Rural" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
+                    <div>
+                        <h3 class="text-xl font-bold mb-2">Casa Rural El Bosque</h3>
+                        <p class="text-gray-700">
+                            Perfecto para grupos grandes. Una casa rural con piscina y vistas panorámicas para una estancia relajada.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 4: DUDAS (AHORA LIBRO DE VISITAS)
+    ======================================
+    Preguntas frecuentes y la sección de mensajes de los invitados.
+    -->
+    <section id="dudas" class="py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Dudas y Mensajes para Isabel
+            </h2>
+            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <!-- Preguntas Frecuentes -->
+                <div class="mb-8">
+                    <h3 class="text-2xl font-bold mb-4">Preguntas Frecuentes</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="font-semibold text-lg">¿Hay código de vestimenta?</p>
+                            <p class="text-gray-700 mt-1">El código de vestimenta es "casual elegante". Queremos que te sientas cómodo, pero festivo.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg">¿Puedo llevar a mi pareja/acompañante?</p>
+                            <p class="text-gray-700 mt-1">Sí, claro, siempre que nos lo confirmes con antelación para la organización.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-lg">¿Se necesita regalo?</p>
+                            <p class="text-gray-700 mt-1">Tu presencia es el mejor regalo. ¡No te preocupes por nada más!</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Formulario para dejar un mensaje -->
+                <div>
+                    <h3 class="text-2xl font-bold mb-4">Deja tu mensaje</h3>
+                    <p class="text-gray-700 mb-4">
+                        Comparte tus buenos deseos o anécdotas para Isabel. ¡Todos podrán ver tu mensaje!
+                    </p>
+                    <form id="message-form" class="space-y-4">
+                        <input type="text" id="message-name" placeholder="Tu nombre" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <textarea id="message-text" placeholder="Tu mensaje" rows="4" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
+                        <button type="submit" id="send-message-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-md hover:bg-blue-700 transition duration-300">
+                            Enviar Mensaje
+                        </button>
+                    </form>
+                    <!-- Contenedor para mostrar los mensajes -->
+                    <div id="messages-list" class="mt-8 space-y-4">
+                        <h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>
+                        <p class="text-gray-500 text-center">Cargando mensajes...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!--
+    ======================================
+    SECCIÓN 5: QUÉ HACER
+    ======================================
+    Otras actividades en la zona.
+    -->
+    <section id="que-hacer" class="bg-gray-100 py-16 px-6 md:px-12">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
+                Qué Hacer en la Zona
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Tarjeta de actividad 1 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Senderismo" alt="Rutas de senderismo" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Rutas de Senderismo</h3>
+                    <p class="text-gray-700">Explora los senderos cercanos y disfruta de la naturaleza y las vistas panorámicas. Hay rutas para todos los niveles.</p>
+                </div>
+                <!-- Tarjeta de actividad 2 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Bodega" alt="Visita a bodega" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Visita a una Bodega Local</h3>
+                    <p class="text-gray-700">La región es famosa por sus vinos. Programa una visita guiada y cata de vinos en alguna de las bodegas cercanas.</p>
+                </div>
+                <!-- Tarjeta de actividad 3 -->
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <img src="https://placehold.co/400x300/444/fff?text=Pueblo" alt="Pueblo pintoresco" class="rounded-xl mb-4 w-full h-48 object-cover">
+                    <h3 class="text-xl font-bold mb-2">Descubre un Pueblo Pintoresco</h3>
+                    <p class="text-gray-700">A pocos minutos en coche, encontrarás encantadores pueblos con historia, tiendas de artesanía y restaurantes tradicionales.</p>
+                </div>
+            </div>
+        </div>
+    </section>
 </body>
 </html>
