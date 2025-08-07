@@ -37,14 +37,12 @@
         };
         // =========================================================================================
         
-        // Obtenemos el AppId del projectId de Firebase
         const appId = firebaseConfig.projectId;
 
         let db;
         let auth;
         let currentUserId;
 
-        // Función de utilidad para convertir base64 a ArrayBuffer para audio (se mantiene según las instrucciones)
         function base64ToArrayBuffer(base64) {
             const binaryString = atob(base64);
             const len = binaryString.length;
@@ -55,40 +53,24 @@
             return bytes.buffer;
         }
 
-        // Función de utilidad para convertir PCM a WAV (se mantiene según las instrucciones)
         function pcmToWav(pcm16, sampleRate) {
-            const dataLength = pcm16.length * 2; // 2 bytes por muestra para Int16
+            const dataLength = pcm16.length * 2;
             const buffer = new ArrayBuffer(44 + dataLength);
             const view = new DataView(buffer);
-
-            // Identificador RIFF
             writeString(view, 0, 'RIFF');
-            // Longitud del archivo
             view.setUint32(4, 36 + dataLength, true);
-            // Tipo RIFF
             writeString(view, 8, 'WAVE');
-            // Identificador de chunk de formato
             writeString(view, 12, 'fmt ');
-            // Longitud de chunk de formato
             view.setUint32(16, 16, true);
-            // Formato de muestra (raw)
             view.setUint16(20, 1, true);
-            // Conteo de canales
             view.setUint16(22, 1, true);
-            // Tasa de muestreo
             view.setUint32(24, sampleRate, true);
-            // Tasa de bytes (tasa de muestreo * alineación de bloque)
             view.setUint32(28, sampleRate * 2, true);
-            // Alineación de bloque (conteo de canales * bytes por muestra)
             view.setUint16(32, 2, true);
-            // Bits por muestra
             view.setUint16(34, 16, true);
-            // Identificador de chunk de datos
             writeString(view, 36, 'data');
-            // Longitud de chunk de datos
             view.setUint32(40, dataLength, true);
 
-            // Escribe los datos PCM
             let offset = 44;
             for (let i = 0; i < pcm16.length; i++) {
                 view.setInt16(offset, pcm16[i], true);
@@ -105,17 +87,15 @@
         }
 
 
-        // Función para mostrar los mensajes
         const displayMessages = (messages) => {
             const messagesListDiv = document.getElementById('messages-list');
-            messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>'; // Limpia los mensajes anteriores y vuelve a añadir el título
+            messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>';
 
             if (messages.length === 0) {
                 messagesListDiv.innerHTML += '<p class="text-gray-500 text-center">Sé el primero en dejar un mensaje.</p>';
                 return;
             }
 
-            // Ordena los mensajes por marca de tiempo en orden ascendente
             messages.sort((a, b) => a.timestamp - b.timestamp);
 
             messages.forEach(message => {
@@ -130,9 +110,8 @@
             });
         };
 
-        // Función para enviar un mensaje a Firestore
         const sendMessage = async (event) => {
-            event.preventDefault(); // Evita el envío predeterminado del formulario
+            event.preventDefault();
 
             const nameInput = document.getElementById('message-name');
             const messageTextInput = document.getElementById('message-text');
@@ -143,33 +122,30 @@
 
             if (!name || !messageText) {
                 console.error("Nombre y mensaje no pueden estar vacíos.");
-                // En una aplicación real, mostrarías un mensaje de error amigable para el usuario
                 return;
             }
 
-            sendButton.disabled = true; // Deshabilita el botón para evitar múltiples envíos
+            sendButton.disabled = true;
 
             try {
                 const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
                 await addDoc(messagesCollectionRef, {
                     name: name,
                     text: messageText,
-                    timestamp: Date.now(), // Almacena la marca de tiempo para ordenar
-                    userId: currentUserId // Almacena el ID de usuario para posibles futuras características (ej. editar mensajes propios)
+                    timestamp: Date.now(),
+                    userId: currentUserId
                 });
 
-                nameInput.value = ''; // Limpia el campo de nombre
-                messageTextInput.value = ''; // Limpia el campo de mensaje
+                nameInput.value = '';
+                messageTextInput.value = '';
                 console.log("Mensaje enviado con éxito!");
             } catch (error) {
                 console.error("Error al enviar el mensaje:", error);
-                // En una aplicación real, muestra un error al usuario
             } finally {
-                sendButton.disabled = false; // Vuelve a habilitar el botón
+                sendButton.disabled = false;
             }
         };
 
-        // Función para configurar el oyente en tiempo real para los mensajes
         const setupRealtimeListener = () => {
             if (!db) {
                 console.error("Firestore no está inicializado.");
@@ -189,28 +165,23 @@
         };
 
 
-        // Función de cuenta regresiva (existente, se mantiene)
         const countdown = () => {
-            // Establece la fecha del evento: 13 de septiembre de 2024 a las 17:00:00. Puedes cambiar el año, mes y día aquí.
             const eventDate = new Date('September 13, 2024 17:00:00').getTime();
             
             const x = setInterval(() => {
                 const now = new Date().getTime();
                 const distance = eventDate - now;
 
-                // Cálculos de tiempo para días, horas, minutos y segundos
                 const days = Math.floor(distance / (1000 * 60 * 60 * 24));
                 const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                 const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
                 const seconds = Math.floor((distance % (1000 * 60)) / 1000);
 
-                // Muestra el resultado en los elementos con IDs
                 document.getElementById("days").innerHTML = days < 10 ? '0' + days : days;
                 document.getElementById("hours").innerHTML = hours < 10 ? '0' + hours : hours;
                 document.getElementById("minutes").innerHTML = minutes < 10 ? '0' + minutes : minutes;
                 document.getElementById("seconds").innerHTML = seconds < 10 ? '0' + seconds : seconds;
 
-                // Si el contador llega a cero, muestra un mensaje
                 if (distance < 0) {
                     clearInterval(x);
                     document.getElementById("countdown").innerHTML = "¡Es el gran día!";
@@ -218,12 +189,9 @@
             }, 1000);
         };
 
-        // Inicializa Firebase y configura los oyentes cuando la ventana se carga
         window.onload = async () => {
-            countdown(); // Inicia la cuenta regresiva existente
+            countdown();
 
-            // Inicializa Firebase
-            // Verificamos que los datos de Firebase existan antes de inicializar
             if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId) { 
                 const firebaseApp = initializeApp(firebaseConfig);
                 auth = getAuth(firebaseApp);
@@ -231,24 +199,21 @@
 
                 onAuthStateChanged(auth, async (user) => {
                     if (!user) {
-                        // Si no hay usuario conectado, intenta iniciar sesión de forma anónima
                         try {
                             await signInAnonymously(auth);
-                            currentUserId = auth.currentUser?.uid || crypto.randomUUID(); // Asegura que el ID de usuario se establezca después del inicio de sesión
+                            currentUserId = auth.currentUser?.uid || crypto.randomUUID();
                             console.log("Autenticación anónima exitosa. ID de usuario:", currentUserId);
                         } catch (error) {
                             console.error("Error durante la autenticación anónima:", error);
-                            currentUserId = crypto.randomUUID(); // Vuelve a un ID aleatorio si la autenticación falla
+                            currentUserId = crypto.randomUUID();
                         }
                     } else {
                          currentUserId = user.uid;
                          console.log("Usuario autenticado:", currentUserId);
                     }
-                    // Configura el oyente de Firestore solo después de que la autenticación esté lista
                     setupRealtimeListener();
                 });
 
-                // Añade el oyente de eventos para el envío del formulario
                 const messageForm = document.getElementById('message-form');
                 if (messageForm) {
                     messageForm.addEventListener('submit', sendMessage);
