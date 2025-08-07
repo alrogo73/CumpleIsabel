@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>¡Feliz 50 Cumpleaños, Isabel!</title>
-    <!-- Incluimos Tailwind CSS para un diseño moderno y adaptable. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -13,7 +12,6 @@
             color: #333;
         }
     </style>
-    <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -21,7 +19,6 @@
 
         // =========================================================================================
         // TU CONFIGURACIÓN DE FIREBASE
-        // Esta es la configuración correcta que proporcionaste.
         // =========================================================================================
         const firebaseConfig = {
           apiKey: "AIzaSyDtYjILTu7SFw6Cp2_NTRNjA6_OW0APefE",
@@ -37,51 +34,6 @@
         let db;
         let auth;
         let currentUserId;
-
-        // Funciones auxiliares para audio (no se usan en esta versión, pero se mantienen por si acaso)
-        function base64ToArrayBuffer(base64) {
-            const binaryString = atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            return bytes.buffer;
-        }
-
-        function pcmToWav(pcm16, sampleRate) {
-            const dataLength = pcm16.length * 2;
-            const buffer = new ArrayBuffer(44 + dataLength);
-            const view = new DataView(buffer);
-            writeString(view, 0, 'RIFF');
-            view.setUint32(4, 36 + dataLength, true);
-            writeString(view, 8, 'WAVE');
-            writeString(view, 12, 'fmt ');
-            view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true);
-            view.setUint16(22, 1, true);
-            view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true);
-            view.setUint16(32, 2, true);
-            view.setUint16(34, 16, true);
-            writeString(view, 36, 'data');
-            view.setUint32(40, dataLength, true);
-
-            let offset = 44;
-            for (let i = 0; i < pcm16.length; i++) {
-                view.setInt16(offset, pcm16[i], true);
-                offset += 2;
-            }
-
-            return new Blob([view], { type: 'audio/wav' });
-        }
-
-        function writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
-            }
-        }
-
 
         // Función para mostrar los mensajes en la página
         const displayMessages = (messages) => {
@@ -126,7 +78,6 @@
             sendButton.disabled = true;
 
             try {
-                // CORRECCIÓN: La ruta ahora utiliza correctamente el projectId
                 const messagesCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/messages`);
                 await addDoc(messagesCollectionRef, {
                     name: name,
@@ -151,7 +102,6 @@
                 console.error("Firestore no está inicializado.");
                 return;
             }
-            // CORRECCIÓN: La ruta ahora utiliza correctamente el projectId
             const messagesCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/messages`);
 
             onSnapshot(messagesCollectionRef, (snapshot) => {
@@ -166,9 +116,10 @@
         };
 
 
-        // Función de cuenta regresiva (existente, se mantiene)
+        // Función de cuenta regresiva
         const countdown = () => {
-            const eventDate = new Date('September 13, 2024 17:00:00').getTime();
+            // FECHA ACTUALIZADA a 2025 para que el contador sea visible
+            const eventDate = new Date('September 13, 2025 17:00:00').getTime();
             
             const x = setInterval(() => {
                 const now = new Date().getTime();
@@ -221,20 +172,14 @@
                     messageForm.addEventListener('submit', sendMessage);
                 }
             } else {
-                console.warn("La configuración de Firebase no está disponible o incompleta. Las funciones de la base de datos no estarán activas.");
-                document.getElementById('messages-list').innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3><p class="text-gray-500 text-center">Las funciones de mensajes no están disponibles (Firebase no configurado correctamente).</p>';
+                console.warn("La configuración de Firebase no está disponible o incompleta.");
+                document.getElementById('messages-list').innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3><p class="text-gray-500 text-center">Las funciones de mensajes no están disponibles.</p>';
             }
         };
     </script>
 </head>
 <body>
 
-    <!--
-    ======================================
-    SECCIÓN 1: PORTADA
-    ======================================
-    Aquí está la portada con la foto, el título y el contador.
-    -->
     <header id="portada" class="bg-blue-700 min-h-screen flex flex-col items-center justify-center text-white text-center p-6">
         <h1 class="text-4xl md:text-6xl font-bold mb-4 animate-fade-in">
             ¡Feliz 50 Cumpleaños, Isabel!
@@ -243,8 +188,6 @@
             Estás invitado a celebrar medio siglo de vida, risas y buenos momentos.
         </p>
 
-        <!-- Nueva ubicación de la foto de Isabel -->
-        <!-- Reemplaza la URL de 'placehold.co' con la URL de la foto real de Isabel. -->
         <img src="https://placehold.co/800x600/666/fff?text=Tu+foto+de+Isabel+aquí" alt="Foto de Isabel" class="rounded-xl shadow-lg mb-8 w-full max-w-md md:max-w-lg object-cover">
 
         <div class="bg-white text-gray-800 p-6 md:p-8 rounded-xl shadow-lg max-w-lg w-full">
@@ -253,187 +196,3 @@
             </p>
             <div id="countdown" class="grid grid-cols-4 gap-2 text-2xl md:text-4xl font-bold">
                 <div class="flex flex-col items-center">
-                    <span id="days">00</span>
-                    <span class="text-sm font-normal">Días</span>
-                </div>
-                <div class="flex flex-col items-center">
-                    <span id="hours">00</span>
-                    <span class="text-sm font-normal">Horas</span>
-                </div>
-                <div class="flex flex-col items-center">
-                    <span id="minutes">00</span>
-                    <span class="text-sm font-normal">Minutos</span>
-                </div>
-                <div class="flex flex-col items-center">
-                    <span id="seconds">00</span>
-                    <span class="text-sm font-normal">Segundos</span>
-                </div>
-            </div>
-        </div>
-
-        <nav class="mt-8">
-            <ul class="flex flex-wrap justify-center space-x-4 md:space-x-8">
-                <li><a href="#portada" class="text-white hover:text-blue-300 transition duration-300">Inicio</a></li>
-                <li><a href="#lugar" class="text-white hover:text-blue-300 transition duration-300">El Evento</a></li>
-                <li><a href="#alojamientos" class="text-white hover:text-blue-300 transition duration-300">Alojamientos</a></li>
-                <li><a href="#dudas" class="text-white hover:text-blue-300 transition duration-300">Dudas</a></li>
-                <li><a href="#que-hacer" class="text-white hover:text-blue-300 transition duration-300">Qué Hacer</a></li>
-            </ul>
-        </nav>
-    </header>
-
-    <!--
-    ======================================
-    SECCIÓN 2: LUGAR DEL EVENTO
-    ======================================
-    Aquí irán los detalles del lugar, un mapa y fotos.
-    -->
-    <section id="lugar" class="py-16 px-6 md:px-12">
-        <div class="max-w-4xl mx-auto">
-            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
-                El Lugar de la Celebración
-            </h2>
-            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
-                <p class="text-gray-700 text-lg mb-6">
-                    El evento se llevará a cabo el <strong>13 de septiembre de 2024 a las 17:00</strong> en el hermoso <strong>Hotel Gerra</strong>, en Cantabria, con vistas espectaculares al mar. Prepárense para una tarde llena de música, comida deliciosa y buena compañía.
-                </p>
-                <div class="flex justify-center mb-6">
-                    <!-- Mapa de Google Maps: Hotel Gerra Mayor, Cantabria (ubicación exacta) -->
-                    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d726.8388481308369!2d-4.3538192!3d43.3961045!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xd490b3f04000001%3A0x7c8719ae43130d0e!2sHotel%20Gerra%20Mayor!5e0!3m2!1ses!2ses!4v1700000000000!5m2!1ses!2ses"
-                            width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy" class="rounded-xl shadow-md"></iframe>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- Imágenes del Hotel Gerra. Reemplaza estas URL con tus propias fotos. -->
-                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Vistas+al+Mar" alt="Vistas al mar desde Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
-                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Interior" alt="Interior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
-                    <img src="https://placehold.co/600x400/4e4444/fff?text=Hotel+Gerra+Exterior" alt="Exterior del Hotel Gerra" class="rounded-xl shadow-md w-full h-auto object-cover">
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!--
-    ======================================
-    SECCIÓN 3: ALOJAMIENTOS
-    ======================================
-    Ideas y fotos de alojamientos cercanos.
-    -->
-    <section id="alojamientos" class="bg-gray-100 py-16 px-6 md:px-12">
-        <div class="max-w-4xl mx-auto">
-            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
-                Opciones de Alojamiento
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <!-- Tarjeta de alojamiento 1 -->
-                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
-                    <img src="https://placehold.co/200x200/444/fff?text=Hotel+A" alt="Hotel A" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
-                    <div>
-                        <h3 class="text-xl font-bold mb-2">Hotel La Vista</h3>
-                        <p class="text-gray-700">
-                            Un hotel encantador a solo 5 minutos del evento. Ofrece desayuno incluido y un excelente servicio.
-                        </p>
-                    </div>
-                </div>
-                <!-- Tarjeta de alojamiento 2 -->
-                <div class="bg-white p-6 rounded-xl shadow-md flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-6">
-                    <img src="https://placehold.co/200x200/444/fff?text=Casa+Rural" alt="Casa Rural" class="w-full md:w-48 h-auto md:h-48 rounded-xl object-cover">
-                    <div>
-                        <h3 class="text-xl font-bold mb-2">Casa Rural El Bosque</h3>
-                        <p class="text-gray-700">
-                            Perfecto para grupos grandes. Una casa rural con piscina y vistas panorámicas para una estancia relajada.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!--
-    ======================================
-    SECCIÓN 4: DUDAS (AHORA LIBRO DE VISITAS)
-    ======================================
-    Preguntas frecuentes y la sección de mensajes de los invitados.
-    -->
-    <section id="dudas" class="py-16 px-6 md:px-12">
-        <div class="max-w-4xl mx-auto">
-            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
-                Dudas y Mensajes para Isabel
-            </h2>
-            <div class="bg-white p-6 rounded-xl shadow-md mb-8">
-                <!-- Preguntas Frecuentes -->
-                <div class="mb-8">
-                    <h3 class="text-2xl font-bold mb-4">Preguntas Frecuentes</h3>
-                    <div class="space-y-4">
-                        <div>
-                            <p class="font-semibold text-lg">¿Hay código de vestimenta?</p>
-                            <p class="text-gray-700 mt-1">El código de vestimenta es "casual elegante". Queremos que te sientas cómodo, pero festivo.</p>
-                        </div>
-                        <div>
-                            <p class="font-semibold text-lg">¿Puedo llevar a mi pareja/acompañante?</p>
-                            <p class="text-gray-700 mt-1">Sí, claro, siempre que nos lo confirmes con antelación para la organización.</p>
-                        </div>
-                        <div>
-                            <p class="font-semibold text-lg">¿Se necesita regalo?</p>
-                            <p class="text-gray-700 mt-1">Tu presencia es el mejor regalo. ¡No te preocupes por nada más!</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Formulario para dejar un mensaje -->
-                <div>
-                    <h3 class="text-2xl font-bold mb-4">Deja tu mensaje</h3>
-                    <p class="text-gray-700 mb-4">
-                        Comparte tus buenos deseos o anécdotas para Isabel. ¡Todos podrán ver tu mensaje!
-                    </p>
-                    <form id="message-form" class="space-y-4">
-                        <input type="text" id="message-name" placeholder="Tu nombre" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                        <textarea id="message-text" placeholder="Tu mensaje" rows="4" class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
-                        <button type="submit" id="send-message-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-md hover:bg-blue-700 transition duration-300">
-                            Enviar Mensaje
-                        </button>
-                    </form>
-                    <!-- Contenedor para mostrar los mensajes -->
-                    <div id="messages-list" class="mt-8 space-y-4">
-                        <h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>
-                        <p class="text-gray-500 text-center">Cargando mensajes...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!--
-    ======================================
-    SECCIÓN 5: QUÉ HACER
-    ======================================
-    Otras actividades en la zona.
-    -->
-    <section id="que-hacer" class="bg-gray-100 py-16 px-6 md:px-12">
-        <div class="max-w-4xl mx-auto">
-            <h2 class="text-3xl md:text-4xl font-bold text-center mb-10">
-                Qué Hacer en la Zona
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                <!-- Tarjeta de actividad 1 -->
-                <div class="bg-white p-6 rounded-xl shadow-md">
-                    <img src="https://placehold.co/400x300/444/fff?text=Senderismo" alt="Rutas de senderismo" class="rounded-xl mb-4 w-full h-48 object-cover">
-                    <h3 class="text-xl font-bold mb-2">Rutas de Senderismo</h3>
-                    <p class="text-gray-700">Explora los senderos cercanos y disfruta de la naturaleza y las vistas panorámicas. Hay rutas para todos los niveles.</p>
-                </div>
-                <!-- Tarjeta de actividad 2 -->
-                <div class="bg-white p-6 rounded-xl shadow-md">
-                    <img src="https://placehold.co/400x300/444/fff?text=Bodega" alt="Visita a bodega" class="rounded-xl mb-4 w-full h-48 object-cover">
-                    <h3 class="text-xl font-bold mb-2">Visita a una Bodega Local</h3>
-                    <p class="text-gray-700">La región es famosa por sus vinos. Programa una visita guiada y cata de vinos en alguna de las bodegas cercanas.</p>
-                </div>
-                <!-- Tarjeta de actividad 3 -->
-                <div class="bg-white p-6 rounded-xl shadow-md">
-                    <img src="https://placehold.co/400x300/444/fff?text=Pueblo" alt="Pueblo pintoresco" class="rounded-xl mb-4 w-full h-48 object-cover">
-                    <h3 class="text-xl font-bold mb-2">Descubre un Pueblo Pintoresco</h3>
-                    <p class="text-gray-700">A pocos minutos en coche, encontrarás encantadores pueblos con historia, tiendas de artesanía y restaurantes tradicionales.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-</body>
-</html>
