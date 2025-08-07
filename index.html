@@ -12,7 +12,6 @@
             background-color: #f7f7f7;
             color: #333;
         }
-        /* Hemos eliminado la clase .hero-bg de aquí, ya que la imagen de Isabel ahora es una etiqueta <img> */
     </style>
     <!-- Firebase SDKs -->
     <script type="module">
@@ -22,7 +21,7 @@
 
         // =========================================================================================
         // TU CONFIGURACIÓN DE FIREBASE
-        // Se ha limpiado el código para eliminar la duplicación.
+        // Esta es la configuración correcta que proporcionaste.
         // =========================================================================================
         const firebaseConfig = {
           apiKey: "AIzaSyDtYjILTu7SFw6Cp2_NTRNjA6_OW0APefE",
@@ -35,12 +34,11 @@
         };
         // =========================================================================================
         
-        const appId = firebaseConfig.projectId;
-
         let db;
         let auth;
         let currentUserId;
 
+        // Funciones auxiliares para audio (no se usan en esta versión, pero se mantienen por si acaso)
         function base64ToArrayBuffer(base64) {
             const binaryString = atob(base64);
             const len = binaryString.length;
@@ -85,6 +83,7 @@
         }
 
 
+        // Función para mostrar los mensajes en la página
         const displayMessages = (messages) => {
             const messagesListDiv = document.getElementById('messages-list');
             messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>';
@@ -108,6 +107,7 @@
             });
         };
 
+        // Función para enviar un mensaje a Firestore
         const sendMessage = async (event) => {
             event.preventDefault();
 
@@ -126,7 +126,8 @@
             sendButton.disabled = true;
 
             try {
-                const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+                // CORRECCIÓN: La ruta ahora utiliza correctamente el projectId
+                const messagesCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/messages`);
                 await addDoc(messagesCollectionRef, {
                     name: name,
                     text: messageText,
@@ -144,12 +145,14 @@
             }
         };
 
+        // Función para configurar el oyente en tiempo real para los mensajes
         const setupRealtimeListener = () => {
             if (!db) {
                 console.error("Firestore no está inicializado.");
                 return;
             }
-            const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+            // CORRECCIÓN: La ruta ahora utiliza correctamente el projectId
+            const messagesCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/messages`);
 
             onSnapshot(messagesCollectionRef, (snapshot) => {
                 const messages = [];
@@ -163,6 +166,7 @@
         };
 
 
+        // Función de cuenta regresiva (existente, se mantiene)
         const countdown = () => {
             const eventDate = new Date('September 13, 2024 17:00:00').getTime();
             
