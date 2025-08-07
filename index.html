@@ -17,9 +17,6 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // =========================================================================================
-        // TU CONFIGURACIÓN DE FIREBASE
-        // =========================================================================================
         const firebaseConfig = {
           apiKey: "AIzaSyDtYjILTu7SFw6Cp2_NTRNjA6_OW0APefE",
           authDomain: "cumpleisabel50-39256.firebaseapp.com",
@@ -29,24 +26,19 @@
           appId: "1:656722830554:web:704637666f9b14234271e3",
           measurementId: "G-1ZLV36PHHT"
         };
-        // =========================================================================================
         
         let db;
         let auth;
         let currentUserId;
 
-        // Función para mostrar los mensajes en la página
         const displayMessages = (messages) => {
             const messagesListDiv = document.getElementById('messages-list');
             messagesListDiv.innerHTML = '<h3 class="text-xl font-bold mb-4">Mensajes de los invitados:</h3>';
-
             if (messages.length === 0) {
                 messagesListDiv.innerHTML += '<p class="text-gray-500 text-center">Sé el primero en dejar un mensaje.</p>';
                 return;
             }
-
             messages.sort((a, b) => a.timestamp - b.timestamp);
-
             messages.forEach(message => {
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'bg-gray-50 p-4 rounded-lg shadow-sm';
@@ -59,24 +51,18 @@
             });
         };
 
-        // Función para enviar un mensaje a Firestore
         const sendMessage = async (event) => {
             event.preventDefault();
-
             const nameInput = document.getElementById('message-name');
             const messageTextInput = document.getElementById('message-text');
             const sendButton = document.getElementById('send-message-btn');
-
             const name = nameInput.value.trim();
             const messageText = messageTextInput.value.trim();
-
             if (!name || !messageText) {
                 console.error("Nombre y mensaje no pueden estar vacíos.");
                 return;
             }
-
             sendButton.disabled = true;
-
             try {
                 const messagesCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/messages`);
                 await addDoc(messagesCollectionRef, {
@@ -85,10 +71,8 @@
                     timestamp: Date.now(),
                     userId: currentUserId
                 });
-
                 nameInput.value = '';
                 messageTextInput.value = '';
-                console.log("Mensaje enviado con éxito!");
             } catch (error) {
                 console.error("Error al enviar el mensaje:", error);
             } finally {
@@ -96,14 +80,9 @@
             }
         };
 
-        // Función para configurar el oyente en tiempo real para los mensajes
         const setupRealtimeListener = () => {
-            if (!db) {
-                console.error("Firestore no está inicializado.");
-                return;
-            }
+            if (!db) { return; }
             const messagesCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/messages`);
-
             onSnapshot(messagesCollectionRef, (snapshot) => {
                 const messages = [];
                 snapshot.forEach(doc => {
@@ -115,58 +94,49 @@
             });
         };
 
-
-        // Función de cuenta regresiva
         const countdown = () => {
-            // FECHA ACTUALIZADA a 2025 para que el contador sea visible
             const eventDate = new Date('September 13, 2025 17:00:00').getTime();
-            
             const x = setInterval(() => {
                 const now = new Date().getTime();
                 const distance = eventDate - now;
 
-                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-
-                document.getElementById("days").innerHTML = days < 10 ? '0' + days : days;
-                document.getElementById("hours").innerHTML = hours < 10 ? '0' + hours : hours;
-                document.getElementById("minutes").innerHTML = minutes < 10 ? '0' + minutes : minutes;
-                document.getElementById("seconds").innerHTML = seconds < 10 ? '0' + seconds : seconds;
-
                 if (distance < 0) {
                     clearInterval(x);
                     document.getElementById("countdown").innerHTML = "¡Es el gran día!";
+                } else {
+                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                    document.getElementById("days").innerHTML = days < 10 ? '0' + days : days;
+                    document.getElementById("hours").innerHTML = hours < 10 ? '0' + hours : hours;
+                    document.getElementById("minutes").innerHTML = minutes < 10 ? '0' + minutes : minutes;
+                    document.getElementById("seconds").innerHTML = seconds < 10 ? '0' + seconds : seconds;
                 }
             }, 1000);
         };
 
         window.onload = async () => {
             countdown();
-
             if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId) { 
                 const firebaseApp = initializeApp(firebaseConfig);
                 auth = getAuth(firebaseApp);
                 db = getFirestore(firebaseApp);
-
                 onAuthStateChanged(auth, async (user) => {
                     if (!user) {
                         try {
                             await signInAnonymously(auth);
                             currentUserId = auth.currentUser?.uid || crypto.randomUUID();
-                            console.log("Autenticación anónima exitosa. ID de usuario:", currentUserId);
                         } catch (error) {
                             console.error("Error durante la autenticación anónima:", error);
                             currentUserId = crypto.randomUUID();
                         }
                     } else {
                          currentUserId = user.uid;
-                         console.log("Usuario autenticado:", currentUserId);
                     }
                     setupRealtimeListener();
                 });
-
                 const messageForm = document.getElementById('message-form');
                 if (messageForm) {
                     messageForm.addEventListener('submit', sendMessage);
@@ -187,9 +157,7 @@
         <p class="text-lg md:text-2xl mb-8">
             Estás invitado a celebrar medio siglo de vida, risas y buenos momentos.
         </p>
-
         <img src="https://placehold.co/800x600/666/fff?text=Tu+foto+de+Isabel+aquí" alt="Foto de Isabel" class="rounded-xl shadow-lg mb-8 w-full max-w-md md:max-w-lg object-cover">
-
         <div class="bg-white text-gray-800 p-6 md:p-8 rounded-xl shadow-lg max-w-lg w-full">
             <p class="text-lg md:text-xl font-semibold mb-4">
                 Nos vemos el 13 de septiembre
@@ -213,7 +181,6 @@
                 </div>
             </div>
         </div>
-
         <nav class="mt-8">
             <ul class="flex flex-wrap justify-center space-x-4 md:space-x-8">
                 <li><a href="#portada" class="text-white hover:text-blue-300 transition duration-300">Inicio</a></li>
